@@ -7,4 +7,4 @@ USAGE
 -----
 
 run the EduPassResetTool.exe file in bin\x64\ and follow the prompts.
-You can also just run the EduPassGUI.Package.ps1 file to load the application. It's a full export of the code.
+You can also just run the EduPassGUI.Export.ps1 file to load the application. It's a full export of the code.

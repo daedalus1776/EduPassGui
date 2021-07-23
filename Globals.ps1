@@ -520,7 +520,7 @@ function Set-eduPassCloudServiceStatus
 	param (
 		[ValidateNotNullOrEmpty()]
 		[string[]]$Identity,
-		[int]$SchoolNumber = (Select-eduSTARMCSchool),
+		$SchoolNumber,
 		[ValidateNotNullOrEmpty()]
 		[Parameter()]
 		[ValidateSet('staff', 'student', 'serviceaccount')]
@@ -539,18 +539,16 @@ function Set-eduPassCloudServiceStatus
 	[array]$DNarray = @()
 	
 	
-	Test-eduSTARMCSchoolNumber $SchoolNumber
-	
 	$Accounts = @()
 	ForEach ($i in $Identity)
 	{
-		$Accounts += Get-eduPassAccount -Identity $i
+		$Accounts += Get-eduPassAccount -Identity $i -SchoolNumber $SchoolNumber
 		
 	}
 	
 	ForEach ($Account in $Accounts)
 	{
-		$DNarray += $Account.DistinguishedName
+		$DNarray += $Account.Dn
 	}
 	
 	
@@ -583,8 +581,8 @@ function Set-eduPassCloudServiceStatus
 		ForEach ($Account in $Accounts)
 		{
 			$row = New-Object PSObject -Property @{
-				Username = $Account.Username
-				Name	 = ("{0} {1}" -f $Account.Surname, $Account.GivenName)
+				Username = $Account.login
+				Name	 = ("{0} {1}" -f $Account.lastName, $Account.firstName)
 				Service  = $Service
 				Status   = $Status
 			}

@@ -4,6 +4,14 @@
 
 
 #Sample function that provides the location of the script
+
+$hkcupath = "HKCU:\Software\GreaterSheppartonSecondaryCollege"
+$testhkcupath = Test-Path -Path $hkcupath
+if ($testhkcupath)
+{
+	$alternate = Get-ItemProperty -Path $hkcupath -Name "Alternate"
+}
+
 function Get-ScriptDirectory
 {
 <#
@@ -266,8 +274,12 @@ function Get-eduSTARMCServiceAccount
 	Write-Output $Result
 }
 
-function Get-eduPassAccount
+if ($testhkcupath)
 {
+	if ($alternate.Alternate)
+	{
+		function Get-eduPassAccount
+		{
     <#
         .SYNOPSIS
             Retrieves information about a student account
@@ -306,74 +318,189 @@ function Get-eduPassAccount
 
             Gets accounts from eduSTAR MC, bypassing cache
     #>
-	
-	param (
-		[string]$Identity,
-		[int]$SchoolNumber = (Select-eduSTARMCSchool),
-		[switch]$Force,
-		[int]$Timeout = 60
-	)
-	
-	$CacheRootPath = "$env:TEMP\eduSTARMCAdministration"
-	$StudentCache = ("{0}\{1}-Students.xml" -f $CacheRootPath, $SchoolNumber)
-	
-	$eduPassAccounts = @()
-	
-	# Check if the cache folder exists before trying to save the XML to temp folder
-	if (-not (Test-Path -Path $CacheRootPath))
-	{
-		New-Item -Path $CacheRootPath -ItemType Directory -Force | Out-Null
-	}
-	
-	# Check if school number is valid
-	#Test-eduSTARMCSchoolNumber $SchoolNumber
-	
-	# If the array is not loaded into memory, attempt to load it from cache (temp folder)
-	if (-not $Force.IsPresent)
-	{
-		try
-		{
-			$Cache = Get-Content -Path $StudentCache -ErrorAction SilentlyContinue
-			$eduPassAccounts = ([xml]$Cache).ArrayOfStudent
+			
+			param (
+				[string]$Identity,
+				[int]$SchoolNumber = (Select-eduSTARMCSchool),
+				[switch]$Force,
+				[int]$Timeout = 60
+			)
+			
+			$CacheRootPath = "$env:TEMP\eduSTARMCAdministration"
+			$StudentCache = ("{0}\{1}-Students.xml" -f $CacheRootPath, $SchoolNumber)
+			
+			$eduPassAccounts = @()
+			
+			# Check if the cache folder exists before trying to save the XML to temp folder
+			if (-not (Test-Path -Path $CacheRootPath))
+			{
+				New-Item -Path $CacheRootPath -ItemType Directory -Force | Out-Null
+			}
+			
+			# Check if school number is valid
+			#Test-eduSTARMCSchoolNumber $SchoolNumber
+			
+			# If the array is not loaded into memory, attempt to load it from cache (temp folder)
+			if (-not $Force.IsPresent)
+			{
+				try
+				{
+					$Cache = Get-Content -Path $StudentCache -ErrorAction SilentlyContinue
+					$eduPassAccounts = ([xml]$Cache).ArrayOfStudent
+				}
+				catch
+				{
+					Write-Output 'Error reading from cache'
+					$eduPassAccounts = $null
+				}
+			}
+			
+			if ($null -eq $eduPassAccounts -or $Force.IsPresent)
+			{
+				# If the array is still empty (cache doesn't exist or failed to read), retrieve new data from the eduSTAR MC
+				
+				Write-Progress -Activity 'Please wait while student data is retrieved from the eduSTAR Management Console...' -PercentComplete 10
+				
+				$Uri = ("https://apps.edustar.vic.edu.au/edustarmc/api/MC/GetStudents/{0}/ALL" -f $SchoolNumber)
+				
+				[xml]$Request = Invoke-RestMethod -Uri $Uri -Method Get -WebSession $eduSTARMCSession -ContentType "application/xml" -TimeoutSec $Timeout
+				
+				
+				$eduPassAccounts = ([xml]$Request).ArrayOfStudent
+				
+				# Save the XML file to temp folder to act as cache
+				$Request.Save($StudentCache)
+				
+				# Hide the progress bar
+				Write-Progress -Activity 'Retrieving all students' -Completed
+			}
+			
+			
+			# Return the student based on login/username
+			if ([string]::IsNullOrEmpty($Identity))
+			{
+				Add-eduPassAccountsAlias($eduPassAccounts.Student)
+			}
+			else
+			{
+				Add-eduPassAccountsAlias($eduPassAccounts.Student) | Where-Object { $_.login -eq $Identity }
+			}
 		}
-		catch
-		{
-			Write-Output 'Error reading from cache'
-			$eduPassAccounts = $null
-		}
-	}
-	
-	if ($null -eq $eduPassAccounts -or $Force.IsPresent)
-	{
-		# If the array is still empty (cache doesn't exist or failed to read), retrieve new data from the eduSTAR MC
-		
-		Write-Progress -Activity 'Please wait while student data is retrieved from the eduSTAR Management Console...' -PercentComplete 10
-		
-		$Uri = ("https://apps.edustar.vic.edu.au/edustarmc/api/MC/GetStudents/{0}/FULL" -f $SchoolNumber)
-		
-		[xml]$Request = Invoke-RestMethod -Uri $Uri -Method Get -WebSession $eduSTARMCSession -ContentType "application/xml" -TimeoutSec $Timeout
-		
-		
-		$eduPassAccounts = ([xml]$Request).ArrayOfStudent
-		
-		# Save the XML file to temp folder to act as cache
-		$Request.Save($StudentCache)
-		
-		# Hide the progress bar
-		Write-Progress -Activity 'Retrieving all students' -Completed
-	}
-	
-	
-	# Return the student based on login/username
-	if ([string]::IsNullOrEmpty($Identity))
-	{
-		Add-eduPassAccountsAlias($eduPassAccounts.Student)
 	}
 	else
 	{
-		Add-eduPassAccountsAlias($eduPassAccounts.Student) | Where-Object { $_.login -eq $Identity }
+		function Get-eduPassAccount
+		{
+    <#
+        .SYNOPSIS
+            Retrieves information about a student account
+            Downloads the entire list of students to cache on first run
+
+        .PARAMETER Force
+            Clears the student cache before retrieving students
+
+        PARAMETER Identity
+            Return a specific user
+
+        .PARAMETER Timeout
+            Optional parameter to set timeout of the request (default is 60 seconds)
+            
+        .EXAMPLE
+
+            Get-eduPassAccount
+
+            Gets accounts from eduSTAR MC, utilising cache if applicable
+
+        .EXAMPLE
+
+            Get-eduPassAccount | Out-GridView
+
+            Gets accounts from eduSTAR MC and outputs to a gridview
+
+        .EXAMPLE
+
+            Get-eduPassAccount -Identity jsmith
+
+            Gets specified account from eduSTAR MC
+
+        .EXAMPLE
+
+            Get-eduPassAccount -Force
+
+            Gets accounts from eduSTAR MC, bypassing cache
+    #>
+			
+			param (
+				[string]$Identity,
+				[int]$SchoolNumber = (Select-eduSTARMCSchool),
+				[switch]$Force,
+				[int]$Timeout = 60
+			)
+			
+			$CacheRootPath = "$env:TEMP\eduSTARMCAdministration"
+			$StudentCache = ("{0}\{1}-Students.xml" -f $CacheRootPath, $SchoolNumber)
+			
+			$eduPassAccounts = @()
+			
+			# Check if the cache folder exists before trying to save the XML to temp folder
+			if (-not (Test-Path -Path $CacheRootPath))
+			{
+				New-Item -Path $CacheRootPath -ItemType Directory -Force | Out-Null
+			}
+			
+			# Check if school number is valid
+			#Test-eduSTARMCSchoolNumber $SchoolNumber
+			
+			# If the array is not loaded into memory, attempt to load it from cache (temp folder)
+			if (-not $Force.IsPresent)
+			{
+				try
+				{
+					$Cache = Get-Content -Path $StudentCache -ErrorAction SilentlyContinue
+					$eduPassAccounts = ([xml]$Cache).ArrayOfStudent
+				}
+				catch
+				{
+					Write-Output 'Error reading from cache'
+					$eduPassAccounts = $null
+				}
+			}
+			
+			if ($null -eq $eduPassAccounts -or $Force.IsPresent)
+			{
+				# If the array is still empty (cache doesn't exist or failed to read), retrieve new data from the eduSTAR MC
+				
+				Write-Progress -Activity 'Please wait while student data is retrieved from the eduSTAR Management Console...' -PercentComplete 10
+				
+				$Uri = ("https://apps.edustar.vic.edu.au/edustarmc/api/MC/GetStudents/{0}/FULL" -f $SchoolNumber)
+				
+				[xml]$Request = Invoke-RestMethod -Uri $Uri -Method Get -WebSession $eduSTARMCSession -ContentType "application/xml" -TimeoutSec $Timeout
+				
+				
+				$eduPassAccounts = ([xml]$Request).ArrayOfStudent
+				
+				# Save the XML file to temp folder to act as cache
+				$Request.Save($StudentCache)
+				
+				# Hide the progress bar
+				Write-Progress -Activity 'Retrieving all students' -Completed
+			}
+			
+			
+			# Return the student based on login/username
+			if ([string]::IsNullOrEmpty($Identity))
+			{
+				Add-eduPassAccountsAlias($eduPassAccounts.Student)
+			}
+			else
+			{
+				Add-eduPassAccountsAlias($eduPassAccounts.Student) | Where-Object { $_.login -eq $Identity }
+			}
+		}
 	}
 }
+
+
 
 function Add-eduPassAccountsAlias
 {
